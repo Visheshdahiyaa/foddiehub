@@ -1,5 +1,6 @@
 import React, { createContext, useState, useEffect } from 'react'
 import { food_items } from '../food'
+import { readDB, updateFavorites, updateRatings } from '../services/db'
 export const dataContext = createContext()
 
 const PROFILES_KEY = 'user_profiles_v1'
@@ -27,9 +28,8 @@ function UserContext({ children }) {
         try { const p = localStorage.getItem(PROFILES_KEY); return p ? JSON.parse(p) : null } catch { return null }
     })
 
+    // Load theme on mount
     useEffect(() => {
-        const savedFavorites = localStorage.getItem('foodFavorites')
-        if (savedFavorites) setFavorites(JSON.parse(savedFavorites))
         const savedTheme = localStorage.getItem('theme')
         if (savedTheme) {
             setDarkMode(savedTheme === 'dark')
@@ -38,8 +38,34 @@ function UserContext({ children }) {
         }
     }, [])
 
+    // When user logs in, load their favorites and ratings from JSONBin
+    useEffect(() => {
+        if (!user) return
+        readDB().then(db => {
+            if (!db) return
+            if (db.favorites?.[user.userId]) {
+                const f = db.favorites[user.userId]
+                setFavorites(f)
+                localStorage.setItem('foodFavorites', JSON.stringify(f))
+            } else {
+                // fallback to localStorage
+                const saved = localStorage.getItem('foodFavorites')
+                if (saved) setFavorites(JSON.parse(saved))
+            }
+            if (db.ratings) {
+                setRatings(db.ratings)
+                localStorage.setItem('food_ratings', JSON.stringify(db.ratings))
+            }
+        }).catch(() => {
+            const saved = localStorage.getItem('foodFavorites')
+            if (saved) setFavorites(JSON.parse(saved))
+        })
+    }, [user])
+
+    // Sync favorites to JSONBin + localStorage
     useEffect(() => {
         localStorage.setItem('foodFavorites', JSON.stringify(favorites))
+        if (user?.userId) updateFavorites(user.userId, favorites)
     }, [favorites])
 
     useEffect(() => {
@@ -53,8 +79,10 @@ function UserContext({ children }) {
         }
     }, [darkMode])
 
+    // Sync ratings to JSONBin + localStorage
     useEffect(() => {
         try { localStorage.setItem('food_ratings', JSON.stringify(ratings)) } catch {}
+        updateRatings(ratings)
     }, [ratings])
 
     useEffect(() => {

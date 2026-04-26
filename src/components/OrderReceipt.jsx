@@ -126,7 +126,7 @@ function OrderReceipt({ order, onClose }) {
 
                     <div className='border-t border-dashed border-gray-300 dark:border-gray-600 my-3' />
 
-                    <p className='text-center text-xs text-gray-400'>Thank you for ordering with FoodieHub! 🍽️</p>
+                    <p className='text-center text-xs text-gray-400'>Thank you for ordering with FoodieHub!</p>
 
                     {/* Actions */}
                     <div className='flex gap-2 mt-4 print:hidden'>

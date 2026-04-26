@@ -3,6 +3,7 @@ import { dataContext } from '../context/UserContext'
 import Nav from '../components/Nav'
 import Footer from '../components/Footer'
 import { loadUsers, saveUsers } from './Login'
+import { readDB } from '../services/db'
 import { toast } from 'react-toastify'
 import {
     MdDashboard, MdRestaurantMenu, MdShoppingCart, MdPeople,
@@ -24,6 +25,23 @@ function AdminDashboard() {
 
     // User management state — live from localStorage
     const [users, setUsers] = useState(() => loadUsers())
+
+    // Sync users from JSONBin on mount
+    useState(() => {
+        readDB().then(db => {
+            if (db?.users) {
+                const normalized = {}
+                Object.entries(db.users).forEach(([id, val]) => {
+                    normalized[id] = typeof val === 'string' ? { password: val, role: 'user' } : val
+                })
+                if (!normalized['admin'] || normalized['admin'].role !== 'admin') {
+                    normalized['admin'] = { password: 'admin123', role: 'admin' }
+                }
+                setUsers(normalized)
+                saveUsers(normalized)
+            }
+        }).catch(() => {})
+    })
     const [showAddUser, setShowAddUser] = useState(false)
     const [newUserId, setNewUserId] = useState('')
     const [newUserPw, setNewUserPw] = useState('')
@@ -38,7 +56,10 @@ function AdminDashboard() {
 
     // Orders from localStorage
     const orders = (() => {
-        try { return JSON.parse(localStorage.getItem('order_history_v1') || '[]') } catch { return [] }
+        try {
+            const raw = localStorage.getItem('order_history_v1')
+            return raw ? JSON.parse(raw) : []
+        } catch { return [] }
     })()
 
     const stats = {

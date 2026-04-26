@@ -10,13 +10,16 @@ import OrderStatus from '../components/OrderStatus'
 import { dataContext } from '../context/UserContext'
 import { RxCross2 } from 'react-icons/rx'
 import { MdCheckCircle } from 'react-icons/md'
+import { MdLocationOn } from 'react-icons/md'
 import Card2 from '../components/Card2'
 import { useSelector, useDispatch } from 'react-redux'
-import { ClearCart } from '../redux/cartSlice'
+import { AddItem, ClearCart } from '../redux/cartSlice'
 import { toast } from 'react-toastify'
+import { readDB, updateOrders } from '../services/db'
 
 const COUPONS = { SAVE10: 10, FLAT50: 50, FOODIE20: 20 }
 const PAGE_SIZE = 8
+const ORDER_RATINGS_KEY = 'order_ratings_v1'
 
 function EmptyCartSVG() {
     return (
@@ -60,6 +63,14 @@ function Home() {
     const [discount, setDiscount] = useState(0)
     const [couponApplied, setCouponApplied] = useState('')
     const [page, setPage] = useState(1)
+    const [orderRatings, setOrderRatings] = useState(() => {
+        try { return JSON.parse(localStorage.getItem(ORDER_RATINGS_KEY) || '{}') } catch { return {} }
+    })
+    const [ratingTarget, setRatingTarget] = useState(null)
+    const [hoverRating, setHoverRating] = useState(0)
+
+    const items = useSelector(state => state.cart)
+    const dispatch = useDispatch()
 
     useEffect(() => {
         let t
@@ -68,17 +79,12 @@ function Home() {
     }, [showPlaced])
 
     useEffect(() => { setCurrentPage('home') }, [setCurrentPage])
-
-    // Reset page when items change
     useEffect(() => { setPage(1) }, [cate])
 
     function filter(category) {
         if (category === 'All') setCate(allItems)
         else setCate(allItems.filter(item => item.food_category === category))
     }
-
-    const items = useSelector(state => state.cart)
-    const dispatch = useDispatch()
 
     const subtotal = items.reduce((total, item) => total + item.qty * item.price, 0)
     const deliveryFee = 20
@@ -89,19 +95,12 @@ function Home() {
     const applyCoupon = () => {
         const code = coupon.trim().toUpperCase()
         if (COUPONS[code]) {
-            setDiscount(COUPONS[code])
-            setCouponApplied(code)
+            setDiscount(COUPONS[code]); setCouponApplied(code)
             toast.success(`Coupon applied! ${COUPONS[code]}% off`)
-        } else {
-            toast.error('Invalid coupon code')
-        }
+        } else { toast.error('Invalid coupon code') }
     }
 
-    const removeCoupon = () => {
-        setDiscount(0)
-        setCouponApplied('')
-        setCoupon('')
-    }
+    const removeCoupon = () => { setDiscount(0); setCouponApplied(''); setCoupon('') }
 
     const handlePlaceOrder = () => {
         if (!items || items.length === 0) { toast.error('Cart is empty'); return }
@@ -111,30 +110,18 @@ function Home() {
     const handlePaymentSuccess = async (deliveryInfo) => {
         const order = {
             id: `order_${Date.now()}`,
-            items,
-            subtotal,
-            deliveryFee,
-            taxes,
-            discount: discountAmt,
-            total,
+            items, subtotal, deliveryFee, taxes,
+            discount: discountAmt, total,
             delivery: deliveryInfo,
             placedAt: new Date().toISOString()
         }
         try {
-            const res = await fetch('http://localhost:4000/orders', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(order)
-            })
-            if (!res.ok) throw new Error()
-        } catch {
-            try {
-                const raw = localStorage.getItem('order_history_v1')
-                const arr = raw ? JSON.parse(raw) : []
-                arr.push(order)
-                localStorage.setItem('order_history_v1', JSON.stringify(arr))
-            } catch {}
-        }
+            const raw = localStorage.getItem('order_history_v1')
+            const arr = raw ? JSON.parse(raw) : []
+            arr.push(order)
+            localStorage.setItem('order_history_v1', JSON.stringify(arr))
+            updateOrders(arr)
+        } catch {}
         dispatch(ClearCart())
         removeCoupon()
         setShowCart(false)
@@ -144,36 +131,46 @@ function Home() {
         addNotification(`Order placed! Rs ${order.total}/- · ${order.items.length} item(s)`, 'success')
     }
 
+    const handleReorder = (ord) => {
+        ord.items.forEach(item => dispatch(AddItem({ id: item.id, name: item.name, price: item.price, image: item.image, qty: 1 })))
+        setSideView('cart')
+        toast.success(`${ord.items.length} item(s) added to cart`)
+        addNotification(`Reordered ${ord.items.length} item(s)`, 'info')
+    }
+
+    const handleOrderRating = (ordId, stars) => {
+        const updated = { ...orderRatings, [ordId]: stars }
+        setOrderRatings(updated)
+        try { localStorage.setItem(ORDER_RATINGS_KEY, JSON.stringify(updated)) } catch {}
+        setRatingTarget(null)
+        toast.success('Thanks for your feedback!')
+        addNotification('Order rated — thank you!', 'success')
+    }
+
     const fetchOrders = async () => {
         setLoadingOrders(true)
         try {
-            const res = await fetch('http://localhost:4000/orders')
-            if (res.ok) { setOrders(await res.json()); return }
-            throw new Error()
-        } catch {
-            try {
+            const db = await readDB()
+            if (db?.orders) {
+                setOrders(db.orders)
+                localStorage.setItem('order_history_v1', JSON.stringify(db.orders))
+            } else {
                 const raw = localStorage.getItem('order_history_v1')
                 setOrders(raw ? JSON.parse(raw) : [])
-            } catch { setOrders([]) }
+            }
+        } catch {
+            const raw = localStorage.getItem('order_history_v1')
+            setOrders(raw ? JSON.parse(raw) : [])
         } finally { setLoadingOrders(false) }
     }
 
     const clearOrders = async () => {
-        try {
-            const res = await fetch('http://localhost:4000/orders', { method: 'DELETE' })
-            if (res.ok) {
-                setOrders([])
-                try { localStorage.removeItem('order_history_v1') } catch {}
-                toast.success('Order history cleared')
-                return
-            }
-        } catch {}
         try { localStorage.removeItem('order_history_v1') } catch {}
+        updateOrders([])
         setOrders([])
         toast.success('Order history cleared')
     }
 
-    // Pagination
     const totalPages = Math.ceil(cate.length / PAGE_SIZE)
     const paginated = cate.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
@@ -185,13 +182,10 @@ function Home() {
             {!input && (
                 <div className='flex flex-wrap justify-center items-center gap-5 w-full px-5'>
                     {Categories.map((item) => (
-                        <div
-                            key={item.name}
+                        <div key={item.name}
                             className='w-[140px] h-[150px] bg-white dark:bg-gray-800 flex flex-col items-start gap-5 p-5 justify-start text-[20px] font-semibold text-gray-600 dark:text-gray-300 rounded-lg shadow-xl hover:bg-green-200 dark:hover:bg-green-800 transition-all duration-200 cursor-pointer'
-                            onClick={() => filter(item.name)}
-                        >
-                            {item.icon}
-                            {item.name}
+                            onClick={() => filter(item.name)}>
+                            {item.icon}{item.name}
                         </div>
                     ))}
                 </div>
@@ -200,15 +194,8 @@ function Home() {
             <div className='w-full flex flex-wrap gap-5 px-5 justify-center items-center pt-8 pb-4'>
                 {paginated.length > 0
                     ? paginated.map(item => (
-                        <Card
-                            key={item.id}
-                            name={item.food_name}
-                            image={item.food_image}
-                            price={item.price}
-                            id={item.id}
-                            type={item.food_type}
-                            item={item}
-                        />
+                        <Card key={item.id} name={item.food_name} image={item.food_image}
+                            price={item.price} id={item.id} type={item.food_type} item={item} />
                     ))
                     : (
                         <div className='flex flex-col items-center py-10 gap-3'>
@@ -221,30 +208,20 @@ function Home() {
                     )}
             </div>
 
-            {/* Pagination */}
             {totalPages > 1 && (
                 <div className='flex justify-center items-center gap-2 pb-8'>
-                    <button
-                        onClick={() => setPage(p => Math.max(1, p - 1))}
-                        disabled={page === 1}
-                        className='px-3 py-1.5 rounded-lg bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 disabled:opacity-40 hover:bg-green-50 dark:hover:bg-green-900 transition-colors'
-                    >
+                    <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
+                        className='px-3 py-1.5 rounded-lg bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 disabled:opacity-40 hover:bg-green-50 transition-colors'>
                         ‹ Prev
                     </button>
                     {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
-                        <button
-                            key={p}
-                            onClick={() => setPage(p)}
-                            className={`w-9 h-9 rounded-lg font-semibold transition-colors ${page === p ? 'bg-green-500 text-white' : 'bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-green-50 dark:hover:bg-green-900'}`}
-                        >
+                        <button key={p} onClick={() => setPage(p)}
+                            className={`w-9 h-9 rounded-lg font-semibold transition-colors ${page === p ? 'bg-green-500 text-white' : 'bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-green-50'}`}>
                             {p}
                         </button>
                     ))}
-                    <button
-                        onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                        disabled={page === totalPages}
-                        className='px-3 py-1.5 rounded-lg bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 disabled:opacity-40 hover:bg-green-50 dark:hover:bg-green-900 transition-colors'
-                    >
+                    <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
+                        className='px-3 py-1.5 rounded-lg bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 disabled:opacity-40 hover:bg-green-50 transition-colors'>
                         Next ›
                     </button>
                 </div>
@@ -272,38 +249,26 @@ function Home() {
                                 ))}
                             </div>
 
-                            {/* Coupon */}
                             <div className='w-full mt-6'>
                                 {couponApplied ? (
                                     <div className='flex items-center justify-between bg-green-50 dark:bg-green-900 border border-green-300 rounded-lg px-3 py-2'>
-                                        <span className='text-sm font-semibold text-green-700 dark:text-green-300'>🎉 {couponApplied} — {discount}% off applied</span>
+                                        <span className='text-sm font-semibold text-green-700 dark:text-green-300'>{couponApplied} — {discount}% off applied</span>
                                         <button onClick={removeCoupon} className='text-xs text-red-500 hover:underline'>Remove</button>
                                     </div>
                                 ) : (
                                     <div className='flex gap-2'>
-                                        <input
-                                            type='text'
-                                            placeholder='Coupon code'
-                                            value={coupon}
-                                            onChange={(e) => setCoupon(e.target.value)}
-                                            className='flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white'
-                                        />
+                                        <input type='text' placeholder='Coupon code' value={coupon}
+                                            onChange={e => setCoupon(e.target.value)}
+                                            className='flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white' />
                                         <button onClick={applyCoupon} className='px-4 py-2 bg-green-500 text-white rounded-lg text-sm font-semibold hover:bg-green-400 transition-colors'>Apply</button>
                                     </div>
                                 )}
                             </div>
 
-                            {/* Bill */}
                             <div className='w-full border-t-2 border-b-2 border-gray-200 dark:border-gray-600 mt-4 flex flex-col gap-2 py-4'>
-                                <div className='flex justify-between text-gray-600 dark:text-gray-300'>
-                                    <span>Subtotal</span><span className='text-green-500 font-semibold'>Rs {subtotal}/-</span>
-                                </div>
-                                <div className='flex justify-between text-gray-600 dark:text-gray-300'>
-                                    <span>Delivery Fee</span><span className='text-green-500 font-semibold'>Rs {deliveryFee}/-</span>
-                                </div>
-                                <div className='flex justify-between text-gray-600 dark:text-gray-300'>
-                                    <span>Taxes</span><span className='text-green-500 font-semibold'>Rs {taxes}/-</span>
-                                </div>
+                                <div className='flex justify-between text-gray-600 dark:text-gray-300'><span>Subtotal</span><span className='text-green-500 font-semibold'>Rs {subtotal}/-</span></div>
+                                <div className='flex justify-between text-gray-600 dark:text-gray-300'><span>Delivery Fee</span><span className='text-green-500 font-semibold'>Rs {deliveryFee}/-</span></div>
+                                <div className='flex justify-between text-gray-600 dark:text-gray-300'><span>Taxes</span><span className='text-green-500 font-semibold'>Rs {taxes}/-</span></div>
                                 {discountAmt > 0 && (
                                     <div className='flex justify-between text-green-600 dark:text-green-400'>
                                         <span>Discount ({discount}%)</span><span className='font-semibold'>- Rs {discountAmt}/-</span>
@@ -314,10 +279,7 @@ function Home() {
                                 <span className='text-xl text-gray-700 dark:text-white font-bold'>Total</span>
                                 <span className='text-green-500 font-bold text-xl'>Rs {total}/-</span>
                             </div>
-                            <button
-                                className='w-[80%] p-3 rounded-lg bg-green-500 text-white hover:bg-green-400 transition-all font-semibold'
-                                onClick={handlePlaceOrder}
-                            >
+                            <button className='w-[80%] p-3 rounded-lg bg-green-500 text-white hover:bg-green-400 transition-all font-semibold' onClick={handlePlaceOrder}>
                                 Place Order
                             </button>
                         </>
@@ -332,22 +294,29 @@ function Home() {
                                     <div key={ord.id} className='w-full p-4 bg-slate-100 dark:bg-gray-700 rounded-lg'>
                                         <div className='flex justify-between items-center'>
                                             <div>
-                                                <div className='font-semibold text-gray-800 dark:text-white text-sm'>Order: {ord.id}</div>
+                                                <div className='font-semibold text-gray-800 dark:text-white text-sm'>Order: {ord.id.slice(-10)}</div>
                                                 <div className='text-xs text-gray-500'>{new Date(ord.placedAt).toLocaleString()}</div>
+                                                {ord.delivery?.address && (
+                                                    <div className='text-xs text-gray-400 mt-0.5 flex items-center gap-1'><MdLocationOn className='w-3 h-3' />{ord.delivery.address}</div>
+                                                )}
                                             </div>
                                             <div className='text-right'>
                                                 <div className='font-semibold text-green-500'>Rs {ord.total}/-</div>
                                                 <div className='text-xs text-gray-500'>{ord.items?.length || 0} items</div>
                                             </div>
                                         </div>
-                                        <div className='mt-2 flex justify-end'>
-                                            <button
-                                                className='px-3 py-1 bg-white dark:bg-gray-600 border rounded text-sm'
-                                                onClick={() => setExpandedOrder(expandedOrder === ord.id ? null : ord.id)}
-                                            >
+
+                                        <div className='mt-2 flex justify-end gap-2'>
+                                            <button onClick={() => handleReorder(ord)}
+                                                className='px-3 py-1 bg-blue-500 text-white rounded text-sm font-semibold hover:bg-blue-600 transition-colors'>
+                                                Reorder
+                                            </button>
+                                            <button onClick={() => setExpandedOrder(expandedOrder === ord.id ? null : ord.id)}
+                                                className='px-3 py-1 bg-white dark:bg-gray-600 border rounded text-sm'>
                                                 {expandedOrder === ord.id ? 'Hide' : 'View'}
                                             </button>
                                         </div>
+
                                         {expandedOrder === ord.id && (
                                             <div className='mt-2 border-t pt-2'>
                                                 {ord.items?.map((it, idx) => (
@@ -363,7 +332,39 @@ function Home() {
                                                 )}
                                             </div>
                                         )}
+
                                         <OrderStatus orderId={ord.id} />
+
+                                        {/* Order Rating */}
+                                        <div className='mt-3 pt-3 border-t border-gray-200 dark:border-gray-600'>
+                                            {orderRatings[ord.id] ? (
+                                                <div className='flex items-center gap-1 text-sm text-gray-500 dark:text-gray-400'>
+                                                    <span>Your rating:</span>
+                                                    {[1,2,3,4,5].map(s => (
+                                                        <span key={s} className={s <= orderRatings[ord.id] ? 'text-yellow-400' : 'text-gray-300'}>★</span>
+                                                    ))}
+                                                </div>
+                                            ) : ratingTarget === ord.id ? (
+                                                <div className='flex items-center gap-1'>
+                                                    <span className='text-xs text-gray-500 dark:text-gray-400 mr-1'>Rate:</span>
+                                                    {[1,2,3,4,5].map(s => (
+                                                        <button key={s}
+                                                            onMouseEnter={() => setHoverRating(s)}
+                                                            onMouseLeave={() => setHoverRating(0)}
+                                                            onClick={() => handleOrderRating(ord.id, s)}
+                                                            className={`text-xl ${s <= hoverRating ? 'text-yellow-400' : 'text-gray-300'}`}>
+                                                            ★
+                                                        </button>
+                                                    ))}
+                                                    <button onClick={() => setRatingTarget(null)} className='text-xs text-gray-400 ml-1'>Cancel</button>
+                                                </div>
+                                            ) : (
+                                                <button onClick={() => setRatingTarget(ord.id)}
+                                                    className='text-xs text-yellow-500 hover:text-yellow-600 font-semibold'>
+                                                    Rate this order
+                                                </button>
+                                            )}
+                                        </div>
                                     </div>
                                 ))}
                             </div>
@@ -372,7 +373,6 @@ function Home() {
                 )}
             </div>
 
-            {/* Order Placed Modal */}
             {showPlaced && (
                 <div className='fixed inset-0 z-50 flex items-center justify-center'>
                     <div className='absolute inset-0 bg-black opacity-50' />
@@ -389,18 +389,13 @@ function Home() {
             )}
 
             {showPayment && (
-                <PaymentGateway
-                    total={total}
-                    onPaymentSuccess={handlePaymentSuccess}
-                    onCancel={() => setShowPayment(false)}
-                />
+                <PaymentGateway total={total} onPaymentSuccess={handlePaymentSuccess} onCancel={() => setShowPayment(false)} />
             )}
 
             {showReceipt && lastOrder && (
                 <OrderReceipt order={lastOrder} onClose={() => setShowReceipt(false)} />
             )}
 
-            {/* Item Detail Modal */}
             {selectedItem && <ItemModal />}
 
             <Footer />

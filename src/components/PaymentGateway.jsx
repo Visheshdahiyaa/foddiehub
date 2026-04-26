@@ -245,7 +245,7 @@ function PaymentGateway({ total, onPaymentSuccess, onCancel }) {
 
                             {method === 'cod' && (
                                 <div className='bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-xl p-4 text-sm text-yellow-800 dark:text-yellow-300'>
-                                    💵 Pay <span className='font-bold'>Rs {total}/-</span> in cash when your order arrives at <span className='font-semibold'>{deliveryAddress}</span>.
+                                    Pay <span className='font-bold'>Rs {total}/-</span> in cash when your order arrives at <span className='font-semibold'>{deliveryAddress}</span>.
                                 </div>
                             )}
 
