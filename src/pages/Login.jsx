@@ -83,10 +83,15 @@ function Login() {
         setAdminId(''); setAdminPw('')
     }
 
-    const handleLogin = (e) => {
+    const handleLogin = async (e) => {
         e.preventDefault()
         if (!loginId || !loginPw) { toast.error('Please enter UserID and password'); return }
-        const u = users[loginId]
+        // Always fetch fresh users from JSONBin
+        const db = await readDB()
+        const freshUsers = db?.users ? normalizeUsers(db.users) : users
+        setUsers(freshUsers)
+        localStorage.setItem(USERS_KEY, JSON.stringify(freshUsers))
+        const u = freshUsers[loginId]
         if (!u || u.password !== loginPw) { toast.error('Invalid UserID or password'); return }
         if (u.role === 'admin') { toast.error('Use the Admin tab to login as admin'); return }
         setUser({ userId: loginId, role: 'user' })
@@ -108,10 +113,18 @@ function Login() {
         toast.success('Account created — welcome!')
     }
 
-    const handleAdminLogin = (e) => {
+    const handleAdminLogin = async (e) => {
         e.preventDefault()
         if (!adminId || !adminPw) { toast.error('Please enter admin credentials'); return }
-        const u = users[adminId]
+        // Always fetch fresh users from JSONBin
+        const db = await readDB()
+        const freshUsers = db?.users ? normalizeUsers(db.users) : users
+        if (!freshUsers['admin'] || freshUsers['admin'].role !== 'admin') {
+            freshUsers['admin'] = { password: 'admin123', role: 'admin' }
+        }
+        setUsers(freshUsers)
+        localStorage.setItem(USERS_KEY, JSON.stringify(freshUsers))
+        const u = freshUsers[adminId]
         if (!u || u.password !== adminPw) { toast.error('Invalid admin credentials'); return }
         if (u.role !== 'admin') { toast.error('This account does not have admin privileges'); return }
         setUser({ userId: adminId, role: 'admin' })
