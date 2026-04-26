@@ -34,7 +34,9 @@ export async function writeDB(data) {
 
 export async function updateUsers(users) {
     const db = await readDB()
-    if (!db) return false
+    if (!db) {
+        return writeDB({ users, orders: [], ratings: {}, favorites: {} })
+    }
     return writeDB({ ...db, users })
 }
 
