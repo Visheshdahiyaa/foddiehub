@@ -86,9 +86,13 @@ function Login() {
     const handleLogin = async (e) => {
         e.preventDefault()
         if (!loginId || !loginPw) { toast.error('Please enter UserID and password'); return }
-        // Always fetch fresh users from JSONBin
+        toast.info('Verifying credentials...')
         const db = await readDB()
-        const freshUsers = db?.users ? normalizeUsers(db.users) : users
+        if (!db) {
+            toast.error('Could not connect to server. Try again.')
+            return
+        }
+        const freshUsers = normalizeUsers(db.users || {})
         setUsers(freshUsers)
         localStorage.setItem(USERS_KEY, JSON.stringify(freshUsers))
         const u = freshUsers[loginId]
@@ -104,12 +108,12 @@ function Login() {
         if (!regId || !regPw) { toast.error('Please fill all fields'); return }
         if (regPw !== regPwConfirm) { toast.error('Passwords do not match'); return }
         if (regPw.length < 4) { toast.error('Password must be at least 4 characters'); return }
-        // Fetch fresh users first to avoid overwriting other registrations
+        toast.info('Creating account...')
         const db = await readDB()
-        const freshUsers = db?.users ? normalizeUsers(db.users) : users
+        if (!db) { toast.error('Could not connect to server. Try again.'); return }
+        const freshUsers = normalizeUsers(db.users || {})
         if (freshUsers[regId]) { toast.error('UserID already taken'); return }
         const next = { ...freshUsers, [regId]: { password: regPw, role: 'user' } }
-        // Wait for JSONBin to confirm before logging in
         const saved = await updateUsers(next)
         if (!saved) { toast.error('Failed to save account, please try again'); return }
         setUsers(next)
