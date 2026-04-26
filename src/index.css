@@ -1,0 +1,29 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Theme overrides to ensure proper light/dark mode */
+:root {
+  --bg-color: white;
+  --text-color: #1f2937;
+  --card-bg: white;
+  --nav-bg: white;
+}
+
+[data-theme="dark"], .dark {
+  --bg-color: #111827;
+  --text-color: #f9fafb;
+  --card-bg: #1f2937;
+  --nav-bg: #1f2937;
+}
+
+/* Force theme colors */
+html {
+  background-color: var(--bg-color);
+  color: var(--text-color);
+}
+
+body {
+  background-color: var(--bg-color);
+  color: var(--text-color);
+}
