@@ -8,6 +8,9 @@ const getHeaders = () => ({
     'X-Bin-Versioning': 'false'
 })
 
+// Local cache — avoids reading before every write
+let cache = null
+
 export async function readDB() {
     try {
         const res = await fetch(`${BASE_URL}/latest`, {
@@ -15,11 +18,12 @@ export async function readDB() {
             headers: getHeaders()
         })
         if (!res.ok) {
-            console.error('JSONBin read failed:', res.status, res.statusText)
+            console.error('JSONBin read failed:', res.status)
             return null
         }
         const json = await res.json()
-        return json.record
+        cache = json.record
+        return cache
     } catch (e) {
         console.error('JSONBin read error:', e)
         return null
@@ -34,9 +38,10 @@ export async function writeDB(data) {
             body: JSON.stringify(data)
         })
         if (!res.ok) {
-            console.error('JSONBin write failed:', res.status, res.statusText)
+            console.error('JSONBin write failed:', res.status)
             return false
         }
+        cache = data // update local cache after successful write
         return true
     } catch (e) {
         console.error('JSONBin write error:', e)
@@ -44,26 +49,32 @@ export async function writeDB(data) {
     }
 }
 
+// Use cache if available, otherwise fetch
+async function getDB() {
+    if (cache) return cache
+    return await readDB()
+}
+
 export async function updateUsers(users) {
-    const db = await readDB()
+    const db = await getDB()
     const base = db || { orders: [], ratings: {}, favorites: {} }
     return writeDB({ ...base, users })
 }
 
 export async function updateOrders(orders) {
-    const db = await readDB()
+    const db = await getDB()
     const base = db || { users: {}, ratings: {}, favorites: {} }
     return writeDB({ ...base, orders })
 }
 
 export async function updateFavorites(userId, favorites) {
-    const db = await readDB()
+    const db = await getDB()
     const base = db || { users: {}, orders: [], ratings: {} }
     return writeDB({ ...base, favorites: { ...(base.favorites || {}), [userId]: favorites } })
 }
 
 export async function updateRatings(ratings) {
-    const db = await readDB()
+    const db = await getDB()
     const base = db || { users: {}, orders: [], favorites: {} }
     return writeDB({ ...base, ratings })
 }
